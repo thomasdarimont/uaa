@@ -21,7 +21,9 @@ import static org.springframework.web.bind.annotation.RequestMethod.GET;
 import static org.springframework.web.bind.annotation.RequestMethod.POST;
 import static org.springframework.web.bind.annotation.RequestMethod.PUT;
 
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -69,16 +71,37 @@ public class IdentityZoneEndpoints {
 
     @RequestMapping(value = "{id}", method = GET)
     public IdentityZone getIdentityZone(@PathVariable String id) {
-        return zoneDao.retrieve(id);
+        List<IdentityZone> result = filterForCurrentZone(Arrays.asList(zoneDao.retrieve(id)));
+        if (result.size()==0) {
+            throw new ZoneDoesNotExistsException("Zone does not exist or is not accessible.");
+        }
+        return result.get(0);
     }
-    
+
     @RequestMapping(method = GET)
     public List<IdentityZone> getIdentityZones() {
-        return zoneDao.retrieveAll();
+        return filterForCurrentZone(zoneDao.retrieveAll());
+    }
+
+    protected List<IdentityZone> filterForCurrentZone(List<IdentityZone> zones) {
+        if (IdentityZoneHolder.isUaa()) {
+            return zones;
+        }
+        String currentId = IdentityZoneHolder.get().getId();
+        List<IdentityZone> result = new LinkedList<>();
+        for (IdentityZone zone : zones) {
+            if (currentId.equals(zone.getId())) {
+                result.add(zone);
+            }
+        }
+        return result;
     }
 
     @RequestMapping(method = POST)
     public ResponseEntity<IdentityZone> createIdentityZone(@RequestBody @Valid IdentityZone body) {
+        if (!IdentityZoneHolder.isUaa()) {
+            throw new AccessDeniedException("Zones can only be created by being authenticated in the default zone.");
+        }
 
         if (!StringUtils.hasText(body.getId())) {
             body.setId(UUID.randomUUID().toString());
@@ -107,6 +130,12 @@ public class IdentityZoneEndpoints {
     @RequestMapping(value = "{id}", method = PUT)
     public ResponseEntity<IdentityZone> updateIdentityZone(
             @RequestBody @Valid IdentityZone body, @PathVariable String id) {
+        if (id==null) {
+            throw new ZoneDoesNotExistsException(id);
+        }
+        if (!IdentityZoneHolder.isUaa() && !id.equals(IdentityZoneHolder.get().getId()) ) {
+            throw new AccessDeniedException("Zone admins can only update their own zone.");
+        }
         IdentityZone previous = IdentityZoneHolder.get();
         try {
             logger.debug("Zone - updating id["+id+"] subdomain["+body.getSubdomain()+"]");
@@ -126,7 +155,12 @@ public class IdentityZoneEndpoints {
     @RequestMapping(method = POST, value = "{identityZoneId}/clients")
     public ResponseEntity<? extends ClientDetails> createClient(
             @PathVariable String identityZoneId, @RequestBody BaseClientDetails clientDetails) {
-
+        if (identityZoneId==null) {
+            throw new ZoneDoesNotExistsException(identityZoneId);
+        }
+        if (!IdentityZoneHolder.isUaa() && !identityZoneId.equals(IdentityZoneHolder.get().getId()) ) {
+            throw new AccessDeniedException("Zone admins can only create clients in their own zone.");
+        }
         IdentityZone previous = IdentityZoneHolder.get();
         try {
             logger.debug("Zone creating client zone["+identityZoneId+"] client["+clientDetails.getClientId()+"]");
@@ -149,7 +183,12 @@ public class IdentityZoneEndpoints {
     @RequestMapping(method = DELETE, value = "{identityZoneId}/clients/{clientId}")
     public ResponseEntity<? extends ClientDetails> deleteClient(
             @PathVariable String identityZoneId, @PathVariable String clientId) {
-
+        if (identityZoneId==null) {
+            throw new ZoneDoesNotExistsException(identityZoneId);
+        }
+        if (!IdentityZoneHolder.isUaa() && !identityZoneId.equals(IdentityZoneHolder.get().getId()) ) {
+            throw new AccessDeniedException("Zone admins can only delete their own zone.");
+        }
         IdentityZone previous = IdentityZoneHolder.get();
         try {
             logger.debug("Zone deleting client zone["+identityZoneId+ "] client[" + clientId+"]");
